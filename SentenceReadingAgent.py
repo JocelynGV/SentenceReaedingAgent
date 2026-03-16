@@ -33,10 +33,12 @@ class SentenceReadingAgent:
       words = sentence.split()
       info = self.categorize_words(words)
 
+      # print(sentence)
       for w in info:
         print(w)
 
       verb_index = None
+      action = None
 
       for token in info:
           if token["pos"] == "verb":
@@ -51,20 +53,30 @@ class SentenceReadingAgent:
 
       # get agent
       for token in info:
-          if token["index"] < verb_index and token["type"] == "animate":
-              agents.append(token["word"])
+        if verb_index is not None and token["index"] < verb_index and token["type"] == "animate":
+          agents.append(token["word"])
       thematic_role["agent"] = agents
 
       # get object
-      for t in info:
-        if t["index"] > verb_index:
+      for i, token in enumerate(info):
+        # Look for nouns
+        if token['pos'] == 'noun':
+            # Look back for adjectives immediately preceding
+            adjectives = []
+            j = i - 1
+            while j >= 0 and info[j]['pos'] == 'adjective':
+                adjectives.insert(0, info[j]['word'])  # keep order
+                j -= 1
+            
+            # Assign object
+            thematic_role['object'] = token['word']
+            # Assign descriptor if any
+            if adjectives:
+                thematic_role['descriptor'] = " ".join(adjectives)
+            
+            # Optional: stop at first noun (if only 1 object per sentence)
+            break
 
-            if t["pos"] == "preposition":
-                break
-
-            if t["pos"] == "noun":
-                thematic_role["object"] = t["word"]
-                break
             
       # override for distance
       distance_units = ['mile', 'miles', 'km', 'kilometer', 'kilometers']
@@ -255,11 +267,27 @@ class SentenceReadingAgent:
                           if t["pos"] == "noun":
                               thematic_role["role"] = t["word"]
                               break
+      
+      #assign conveyance
+      movement_verbs = ["walk", "run", "go", "travel", "drive", "bike", "ride"]
+      # After detecting the main verb and agents
+      thematic_role['verb'] = action  # your existing logic
+
+      # If the verb is a movement verb, also assign to conveyance
+      if action is not None:
+        if action.lower() in movement_verbs:
+          thematic_role['conveyance'] = action.lower()
 
       print("Thematic Role:" + str(thematic_role))
 
-      # slot = self.get_slot_from_question(question)
-      # print(f"Question: {q} → Thematic slot: {slot}")
+      slot_result = self.get_slot_from_question(question, thematic_role)
+      # print(f"Question: {question} → Thematic slot result: {slot_result}")
+      # print("return ": + str(thematic_role[slot]))
+
+      if slot_result is not None:
+        return self.normalize_answer(slot_result)
+      else:
+          return None
 
 
 
@@ -342,8 +370,10 @@ class SentenceReadingAgent:
         word_info = []
 
         for i, word in enumerate(words):
+            if word is None:
+              continue  # skip None tokens
             word_lower = word.lower()
-
+            
             pos = "unknown"
             semantic_type = None
 
@@ -427,13 +457,14 @@ class SentenceReadingAgent:
       return True
     
 
-    def get_slot_from_question(self,question):
+    def get_slot_from_question(self,question, thematic_role):
       # Map of keywords/phrases to the role in thematic_role
       question_slot_map = {
           "who": ["agent", "recipient", "coagent"],  # context will decide which one
           "what": ["object", "descriptor"],
           "where": ["destination", "location"],
           "how far": ["distance"],
+          "how long": ["descriptor"],
           "how": ["conveyance", "instrument", "action"],  # "how do they walk" etc
           "when": ["time"],
           "at what time": ["time"]
@@ -442,9 +473,11 @@ class SentenceReadingAgent:
       
       # Check for multi-word patterns first
       if "how far" in q:
-          return "distance"
+          return thematic_role["distance"]
+      if "how long" in q:
+          return thematic_role["descriptor"]
       elif "at what time" in q:
-          return "time"
+          return thematic_role["time"]
 
       # Otherwise, check first word
       first_word = q.split()[0]
@@ -452,22 +485,56 @@ class SentenceReadingAgent:
       if first_word == "who":
           # Special patterns for recipient or coagent
           if "did" in q and "to" in q:
-              return "recipient"
+              return thematic_role["recipient"]
           elif "with" in q:
-              return "coagent"
+              if thematic_role["coagent"] is not None:
+                  return thematic_role["coagent"]
+              else:
+                  names = thematic_role["agent"]
+                  
+                  if not names:
+                      return None
+
+                  # Lowercase everything for matching
+                  if names is None:
+                    names = []
+
+                  names_lower = [n.lower() for n in names if n is not None]
+                  q_words = question.lower().split()
+
+                  # Remove any name that appears in the question
+                  filtered = [names[i] for i in range(len(names)) if names_lower[i] not in q_words]
+
+                  if len(filtered) == 0:
+                      return None
+                  elif len(filtered) == 1:
+                      return filtered[0].capitalize()
+                  else:
+                      return [n.capitalize() for n in filtered]
           else:
-              return "agent"
+              return thematic_role["agent"]
       elif first_word == "what":
-          return "object"
+          return thematic_role["object"]
       elif first_word == "where":
-          return "destination"
+          return thematic_role["destination"]
       elif first_word == "how":
-          return "conveyance"  # could check further with "by" or "with"
+          return thematic_role["conveyance"]  # could check further with "by" or "with"
       elif first_word == "when":
-          return "time"
+          return thematic_role["time"]
       else:
         return None
+      
 
+    def normalize_answer(self, value):
+        if isinstance(value, list):
+            if len(value) == 1:
+                return value[0].capitalize()  # capitalize proper noun
+            else:
+                return [v.capitalize() for v in value]  # optional: capitalize all
+        elif isinstance(value, str):
+            return value.capitalize()  # optional: capitalize first letter
+        else:
+            return value
 
 verb = {
 "add","answer","appear","ask","began","begin","bring","brought","build","call","came","care",
@@ -492,12 +559,12 @@ noun = {
 "earth","ease","end","example","eye","fact","fall","family","farm","feet","field","figure",
 "fire","fish","food","foot","force","form","friend","front","game","girl","gold","ground",
 "group","hand","head","heat","home","horse","hour","idea","inch","interest","island","king",
-"land","language","laura","letter","life","light","line","list","lot","love","machine","man",
+"land","language","letter","life","light","line","list","lot","love","machine","man",
 "map","measure","men","mile","minute","money","moon","morning","mother","mountain","music",
 "name","night","north","number","order","page","paper","part","pattern","people","person",
 "picture","piece","place","plan","plane","plant","point","port","pound","power","press",
 "problem","product","question","rain","river","road","rock","room","rule","school","science",
-"sea","self","sentence","serena","shape","ship","side","size","sleep","snow","song","state",
+"sea","self","sentence","shape","ship","side","size","sleep","snow","song","state",
 "story","street","study","surface","table","tail","test","thing","time","town","travel","tree",
 "unit","use","voice","vowel","war","water","way","week","weight","wheel","wind","wonder",
 "wood","word","world","year","book","box","center","east","father","green","house","record",
@@ -506,7 +573,7 @@ noun = {
 
 proper_noun = {
 "ada","andrew","bobbie","cason","david","farzana","frank","hannah",
-"ida","irene","jim","jose","keith","lucy","mark","meredith","nick","yan"
+"ida","irene","jim","jose","keith","lucy","mark","meredith","nick","yan","serena","laura"
 }
 
 adjective = {
@@ -559,7 +626,7 @@ animate = {
 "ada","andrew","bobbie","cason","david","farzana","frank","hannah",
 "ida","irene","jim","jose","keith","lucy","mark","meredith","nick","yan",
 "adult","adults","boy","children","dog","dogs","family","friend",
-"girl","king","man","men","mother","people","person"
+"girl","king","man","men","mother","people","person","he","she", "it","they","us","we","you","your"
 }
 
 

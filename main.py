@@ -19,6 +19,12 @@ def test():
     question_8 = "How do David and Lucy get to school?"
     question_9 = "At what time do David and Lucy walk to school?"
 
+    sentence_3 = "Serena saw a home last night with her friend."
+    question_10 = "When did they see a home?"
+
+    sentence_4 = "She will write him a love letter."
+    question_11 = "Who wrote a love letter?"
+
     print(test_agent.solve(sentence_1, question_1))  # "Ada"
     print(test_agent.solve(sentence_1, question_2))  # "note" or "a note"
     print(test_agent.solve(sentence_1, question_3))  # "Irene"
@@ -29,6 +35,8 @@ def test():
     print(test_agent.solve(sentence_2, question_7))  # "mile" or "a mile"
     print(test_agent.solve(sentence_2, question_8))  # "walk"
     print(test_agent.solve(sentence_2, question_9))  # "8:00AM"
+    print(test_agent.solve(sentence_3, question_10))  # "last night"
+    print(test_agent.solve(sentence_4, question_11))  # "She"
 
 if __name__ == "__main__":
     test()
