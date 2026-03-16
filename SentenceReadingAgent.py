@@ -65,6 +65,21 @@ class SentenceReadingAgent:
             if t["pos"] == "noun":
                 thematic_role["object"] = t["word"]
                 break
+            
+      # override for distance
+      distance_units = ['mile', 'miles', 'km', 'kilometer', 'kilometers']
+      number_words = ['one','two','three','four','five','six','seven','eight','nine','ten']  # add more if needed
+
+      for i, token in enumerate(info):
+          word_lower = token['word'].lower()
+          # Check if token is a number or 'a'/'an' or written number
+          if word_lower in ['a','an'] + number_words or token['pos'] == 'number':
+              next_tok = info[i+1] if i+1 < len(info) else None
+              if next_tok and next_tok['word'].lower() in distance_units:
+                  thematic_role['distance'] = f"{token['word']} {next_tok['word']}"
+                  # remove from object if needed
+                  if thematic_role.get('object') == next_tok['word']:
+                      thematic_role['object'] = None
 
       # analyze prepositions
       for token in info:
@@ -243,6 +258,9 @@ class SentenceReadingAgent:
 
       print("Thematic Role:" + str(thematic_role))
 
+      # slot = self.get_slot_from_question(question)
+      # print(f"Question: {q} → Thematic slot: {slot}")
+
 
 
       '''
@@ -305,55 +323,76 @@ class SentenceReadingAgent:
 
       
     def categorize_words(self, words):
-      # POS dictionary
-      pos_categories = {
-          "verb": verb,
-          "aux_verb": aux_verb,
-          "noun": noun,
-          "proper_noun": proper_noun,
-          "pronoun": pronoun,
-          "adjective": adjective,
-          "adverb": adverb,
-          "determiner": determiner,
-          "preposition": preposition,
-          "conjunction": conjunction,
-          "number": number,
-          "interjection": interjection
-      }
+        # POS dictionary
+        pos_categories = {
+            "verb": verb,
+            "aux_verb": aux_verb,
+            "noun": noun,
+            "proper_noun": proper_noun,
+            "pronoun": pronoun,
+            "adjective": adjective,
+            "adverb": adverb,
+            "determiner": determiner,
+            "preposition": preposition,
+            "conjunction": conjunction,
+            "number": number,
+            "interjection": interjection
+        }
 
-      word_info = []
+        word_info = []
 
-      for i, word in enumerate(words):
+        for i, word in enumerate(words):
+            word_lower = word.lower()
 
-          word_lower = word.lower()
+            pos = "unknown"
+            semantic_type = None
 
-          pos = "unknown"
-          semantic_type = None
+            # Detect part of speech
+            for category, word_set in pos_categories.items():
+                if word_lower in word_set:
+                    pos = category
+                    break
 
-          # Detect part of speech
-          for category, word_set in pos_categories.items():
-              if word_lower in word_set:
-                  pos = category
-                  break
+            # Detect semantic type
+            if word in proper_noun or word in animate:
+                semantic_type = "animate"
+            elif word in noun:
+                semantic_type = "inanimate"
 
-          # Detect semantic type
-          if word in proper_noun or word in animate:
-              semantic_type = "animate"
-          elif word in noun:
-              semantic_type = "inanimate"
+            if self.is_time(word):
+                semantic_type = "time"
 
-          if self.is_time(word):
-              semantic_type = "time"
+            word_info.append({
+                "word": word,
+                "pos": pos,
+                "type": semantic_type,
+                "index": i
+            })
 
-          # Store structured information
-          word_info.append({
-              "word": word,
-              "pos": pos,
-              "type": semantic_type,
-              "index": i
-          })
+        word_info = self.override_pos(word_info)
 
-      return word_info
+        return word_info
+
+    def override_pos(self, word_info):
+        # Build the ambiguous words set
+        if isinstance(noun, set):
+            ambiguous_nouns_verbs = noun.intersection(verb)
+        else:
+            ambiguous_nouns_verbs = set(noun).intersection(set(verb))
+
+        for i, token in enumerate(word_info):
+            prev_tokens = word_info[max(0, i-2):i]  # look back up to 2 tokens
+
+            # Only override ambiguous words
+            if token['word'].lower() in ambiguous_nouns_verbs:
+                if any(t['pos'] in ['determiner', 'adjective', 'number'] for t in prev_tokens):
+                    token['pos'] = 'noun'
+                else:
+                    prev = word_info[i-1] if i > 0 else None
+                    if prev and prev['pos'] == 'verb':
+                        token['pos'] = 'noun'
+
+        return word_info
     
     def is_time(self, word):
       word = word.upper()
@@ -386,6 +425,48 @@ class SentenceReadingAgent:
           return False
 
       return True
+    
+
+    def get_slot_from_question(self,question):
+      # Map of keywords/phrases to the role in thematic_role
+      question_slot_map = {
+          "who": ["agent", "recipient", "coagent"],  # context will decide which one
+          "what": ["object", "descriptor"],
+          "where": ["destination", "location"],
+          "how far": ["distance"],
+          "how": ["conveyance", "instrument", "action"],  # "how do they walk" etc
+          "when": ["time"],
+          "at what time": ["time"]
+}
+      q = question.lower()
+      
+      # Check for multi-word patterns first
+      if "how far" in q:
+          return "distance"
+      elif "at what time" in q:
+          return "time"
+
+      # Otherwise, check first word
+      first_word = q.split()[0]
+
+      if first_word == "who":
+          # Special patterns for recipient or coagent
+          if "did" in q and "to" in q:
+              return "recipient"
+          elif "with" in q:
+              return "coagent"
+          else:
+              return "agent"
+      elif first_word == "what":
+          return "object"
+      elif first_word == "where":
+          return "destination"
+      elif first_word == "how":
+          return "conveyance"  # could check further with "by" or "with"
+      elif first_word == "when":
+          return "time"
+      else:
+        return None
 
 
 verb = {
